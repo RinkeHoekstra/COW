@@ -1,14 +1,13 @@
-from rdflib import Dataset, Graph, Namespace, RDF, RDFS, OWL, XSD, Literal, URIRef
+from rdflib import Dataset, Graph, Literal, URIRef, Namespace
 import os
-import yaml
 import datetime
-import string
 import logging
 import iribaker
-import urllib
 import uuid
 
 from hashlib import sha1
+
+from .namespaces import PREFIXES, RDF, RDFS, NP, QB, SKOS, PROV, FOAF, XSD, COW
 
 
 logger = logging.getLogger(__name__)
@@ -17,57 +16,16 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 logger.addHandler(ch)
 
-"""
-Initialize a set of default namespaces from a configuration file (namespaces.yaml)
-"""
-# global namespaces
-namespaces = {}
-YAML_NAMESPACE_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'namespaces.yaml')
 
+# Serialization extension dictionary
+EXTENSIONS = {'xml': 'xml', 'n3': 'n3', 'turtle': 'ttl', 'nt': 'nt', 'pretty-xml': 'xml', 'trix': 'trix',
+                    'trig': 'trig', 'nquads': 'nq'}
 
-def init():
-    """
-    Initialize the module and assign namespaces to globals
-    """
-    # Read the file into a dictionary
-    with open(YAML_NAMESPACE_FILE, 'r') as nsfile:
-        global namespaces
-        namespaces = yaml.load(nsfile, Loader=yaml.FullLoader)
-
-    # Replace each value with a Namespace object for that value
-    for prefix, uri in namespaces.items():
-        if isinstance(prefix, str) and isinstance(uri, str):
-            namespaces[prefix] = Namespace(uri)
-
-    # Add all namespace prefixes to the globals dictionary (for exporting)
-    for prefix, namespace in namespaces.items():
-        globals()[prefix.upper()] = namespace
-
-# Make sure the namespaces are initialized when the module is imported
-init()
-
-
-def reindent(s, numSpaces):
+def reindent(s, num_spaces):
     s = s.split('\n')
-    s = [(numSpaces * ' ') + string.lstrip(line) for line in s]
+    s = [(num_spaces * ' ') + line.lstrip() for line in s]
     s = "\n".join(s)
     return s
-
-
-def serializeTrig(rdf_dataset):
-    turtles = []
-    for c in rdf_dataset.contexts():
-        if c.identifier != URIRef('urn:x-rdflib:default'):
-            turtle = "<{id}> {{\n".format(id=c.identifier)
-            turtle += reindent(c.serialize(format='turtle'), 4)
-            turtle += "}\n\n"
-        else:
-            turtle = c.serialize(format='turtle')
-            turtle += "\n\n"
-
-        turtles.append(turtle)
-
-    return "\n".join(turtles)
 
 
 def git_hash(data):
@@ -87,25 +45,18 @@ def apply_default_namespaces(graph):
     provided as argument and returns the graph.
     """
 
-    for prefix, namespace in namespaces.items():
+    for prefix, namespace in PREFIXES.items():
         graph.bind(prefix, namespace)
 
     return graph
 
 
 def get_namespaces(base=None):
-    """Return the global namespaces"""
+    """Return the global namespaces and additional ones bound to the base URI"""
+    namespaces = PREFIXES
     if base:
-        try:
-            # Python 2
-            namespaces['sdr'] = Namespace(unicode(base + u'/'))
-            namespaces['sdv'] = Namespace(unicode(base + u'/vocab/'))
-        except NameError:
-            # Python 3
-            namespaces['sdr'] = Namespace(str(base + u'/'))
-            namespaces['sdv'] = Namespace(str(base + u'/vocab/'))
-        with open(YAML_NAMESPACE_FILE, 'w') as outfile:
-            yaml.dump(namespaces, outfile, default_flow_style=True)
+        namespaces['dataset'] = Namespace(str(base + u'/'))
+
     return namespaces
 
 
@@ -264,30 +215,6 @@ class DatastructureDefinition(Graph):
                 pass
 
 
-class Profile(Graph):
-    """
-    An RDFLib Graph that contains author information based on a Google Profile
-    """
-
-    def __init__(self, profile):
-        # A URI that represents the author
-
-        # Virtuoso does not accept the @
-        self.author_uri = SDP[urllib.quote_plus(profile['email'])]
-
-        super(Profile, self).__init__(identifier=self.author_uri)
-
-        self.add((self.author_uri, RDF.type, FOAF['Person']))
-        self.add((self.author_uri, FOAF['name'], Literal(profile['name'])))
-        self.add((self.author_uri, FOAF['email'], Literal(profile['email'])))
-        self.add((self.author_uri, SDV['googleId'], Literal(profile['id'])))
-        try:
-            self.add((self.author_uri, FOAF['depiction'], URIRef(profile['image'])))
-        except KeyError:
-            logger.warning('No author depiction provided in author profile')
-
-
-
 class Nanopublication(Dataset):
     """
     A subclass of the rdflib Dataset class that comes pre-initialized with
@@ -297,7 +224,7 @@ class Nanopublication(Dataset):
     NOTE: Will only work if the required namespaces are specified in namespaces.yaml and the init() function has been called
     """
 
-    def __init__(self, file_name):
+    def __init__(self, file_name, base):
         """
         Initialize the graphs needed for the nanopublication
         """
@@ -306,9 +233,12 @@ class Nanopublication(Dataset):
         # Virtuoso does not accept BNodes as graph names
         self.default_context = Graph(store=self.store, identifier=URIRef(uuid.uuid4().urn))
 
+        # Get relevant namespaces, including one for the base uri provided.
+        namespaces = get_namespaces(base)
 
+        BASE = namespaces['dataset']
         # Assign default namespace prefixes
-        for prefix, namespace in namespaces.items():
+        for prefix, namespace in namespaces:
             self.bind(prefix, namespace)
 
         # Get the current date and time (UTC)
@@ -328,21 +258,21 @@ class Nanopublication(Dataset):
         hash_part = short_hash + '/' + timestamp
 
         # A URI that represents the version of the file being converted
-        self.dataset_version_uri = SDR[source_hash]
-        self.add((self.dataset_version_uri, SDV['path'], Literal(file_name, datatype=XSD.string)))
-        self.add((self.dataset_version_uri, SDV['sha1_hash'], Literal(source_hash, datatype=XSD.string)))
+        self.dataset_version_uri = BASE[source_hash]
+        self.add((self.dataset_version_uri, COW['path'], Literal(file_name, datatype=XSD.string)))
+        self.add((self.dataset_version_uri, COW['sha1_hash'], Literal(source_hash, datatype=XSD.string)))
 
         # ----
         # The nanopublication graph
         # ----
         name = (os.path.basename(file_name)).split('.')[0]
-        self.uri = SDR[name + '/nanopublication/' + hash_part]
+        self.uri = BASE[name + '/nanopublication/' + hash_part]
 
 
         # The Nanopublication consists of three graphs
-        assertion_graph_uri = SDR[name + '/assertion/' + hash_part]
-        provenance_graph_uri = SDR[name + '/provenance/' + hash_part]
-        pubinfo_graph_uri = SDR[name + '/pubinfo/' + hash_part]
+        assertion_graph_uri = BASE[name + '/assertion/' + hash_part]
+        provenance_graph_uri = BASE[name + '/provenance/' + hash_part]
+        pubinfo_graph_uri = BASE[name + '/pubinfo/' + hash_part]
 
         self.ag = self.graph(assertion_graph_uri)
         self.pg = self.graph(provenance_graph_uri)

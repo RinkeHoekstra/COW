@@ -1,4 +1,4 @@
-from converter.qberify import build_schema
+from .converter.qber import build_schema
 import argparse
 
 parser = argparse.ArgumentParser(description="Convert CSV files to JSON Metadata files (according to W3C CSV on the Web)")

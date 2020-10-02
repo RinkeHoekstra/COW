@@ -12,34 +12,21 @@ from chardet.universaldetector import UniversalDetector
 import multiprocessing as mp
 import unicodecsv as csv
 from jinja2 import Template
-try:
-    # Python 2
-    from util import get_namespaces, Nanopublication, CSVW, PROV, DC, SKOS, RDF
-except ImportError:
-    from .util import get_namespaces, Nanopublication, CSVW, PROV, DC, SKOS, RDF
+from .util import get_namespaces, Nanopublication, EXTENSIONS
+from .util.namespaces import CSVW, PROV, DCT, SKOS, RDF
 from rdflib import URIRef, Literal, Graph, BNode, XSD, Dataset
 from rdflib.resource import Resource
 from rdflib.collection import Collection
 from functools import partial
-try:
-    # Python 3
-    from itertools import zip_longest
-except ImportError:
-    # Python 2
-    from itertools import izip_longest as zip_longest
+from itertools import zip_longest
 
-import io
-
-# Python 2 and 3 compatible unicode
-# from builtins import str
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-# Serialization extension dictionary
-extensions = {'xml': 'xml', 'n3' : 'n3', 'turtle': 'ttl', 'nt' : 'nt', 'pretty-xml' : 'xml', 'trix' : 'trix', 'trig' : 'trig', 'nquads' : 'nq'}
+
 
 
 def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None, dataset_name=None, base="https://iisg.amsterdam/"):
@@ -69,16 +56,10 @@ def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None,
                                                                    detector.result['confidence']))
 
     if delimiter is None:
-        try: #Python 3
-            with open(infile, 'r', errors='ignore') as csvfile:
-                # dialect = csv.Sniffer().sniff(csvfile.read(1024), delimiters=";,$\t")
-                dialect = csv.Sniffer().sniff(csvfile.readline()) #read only the header instead of the entire file to determine delimiter
-                csvfile.seek(0)
-        except TypeError: #Python 2
-            with open(infile, 'r') as csvfile:
-                # dialect = csv.Sniffer().sniff(csvfile.read(1024), delimiters=";,$\t")
-                dialect = csv.Sniffer().sniff(csvfile.readline()) #read only the header instead of the entire file to determine delimiter
-                csvfile.seek(0)
+        with open(infile, 'r', errors='ignore') as csvfile:
+            # dialect = csv.Sniffer().sniff(csvfile.read(1024), delimiters=";,$\t")
+            dialect = csv.Sniffer().sniff(csvfile.readline()) #read only the header instead of the entire file to determine delimiter
+            csvfile.seek(0)
         logger.info("Detected dialect: {} (delimiter: '{}')".format(dialect, dialect.delimiter))
         delimiter = dialect.delimiter
 
@@ -99,14 +80,14 @@ def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None,
                     u"encoding": encoding,
                     u"quoteChar": quotechar
                     },
-        u"dc:title": dataset_name,
+        u"dct:title": dataset_name,
         u"dcat:keyword": [],
-        u"dc:publisher": {
+        u"dct:publisher": {
             u"schema:name": u"CLARIAH Structured Data Hub - Datalegend",
             u"schema:url": {u"@id": u"http://datalegend.net"}
         },
-        u"dc:license": {u"@id": u"http://opendefinition.org/licenses/cc-by/"},
-        u"dc:modified": {u"@value": today, u"@type": u"xsd:date"},
+        u"dct:license": {u"@id": u"http://opendefinition.org/licenses/cc-by/"},
+        u"dct:modified": {u"@value": today, u"@type": u"xsd:date"},
         u"tableSchema": {
             u"columns": [],
             u"primaryKey": None,
@@ -114,15 +95,11 @@ def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None,
         }
     }
 
-    with io.open(infile, 'rb') as infile_file:
+    with open(infile, 'rb') as infile_file:
         r = csv.reader(infile_file, delimiter=delimiter, quotechar=quotechar)
 
-        try:
-            # Python 2
-            header = r.next()
-        except AttributeError:
-            # Python 3
-            header = next(r)
+
+        header = next(r)
 
         logger.info(u"Found headers: {}".format(header))
 
@@ -139,7 +116,7 @@ def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None,
                 u"@id": iribaker.to_iri(u"{}/{}/column/{}".format(base, url, head)),
                 u"name": head,
                 u"titles": [head],
-                u"dc:description": head,
+                u"dct:description": head,
                 u"datatype": u"string"
             }
 
@@ -158,6 +135,7 @@ class Item(Resource):
     def __getattr__(self, p):
         """Returns the object for predicate p, either as a list (when multiple bindings exist), as an Item
            when only one object exists, or Null if there are no values for this predicate"""
+        objects = []
         try:
             objects = list(self.objects(self._to_ref(*p.split('_', 1))))
         except:
@@ -190,11 +168,13 @@ class CSVWConverter(object):
     * A nanopublication structure for publishing the converted data (using :class:`converter.util.Nanopublication`)
     """
 
+
+
     def __init__(self, file_name, delimiter=',', quotechar='\"', encoding='utf-8', processes=4, chunksize=5000, output_format='nquads'):
         logger.info("Initializing converter for {}".format(file_name))
         self.file_name = file_name
         self.output_format = output_format
-        self.target_file = self.file_name + '.' + extensions[self.output_format]
+        self.target_file = self.file_name + '.' + EXTENSIONS[self.output_format]
         schema_file_name = file_name + '-metadata.json'
 
         if not os.path.exists(schema_file_name) or not os.path.exists(file_name):
@@ -206,8 +186,7 @@ class CSVWConverter(object):
         logger.info("Processes: {}".format(self._processes))
         logger.info("Chunksize: {}".format(self._chunksize))
 
-        self.np = Nanopublication(file_name)
-        # self.metadata = json.load(open(schema_file_name, 'r'))
+
         self.metadata_graph = Graph()
         with open(schema_file_name, 'rb') as f:
             try:
@@ -221,26 +200,25 @@ class CSVWConverter(object):
 
         # Get the URI of the schema specification by looking for the subject
         # with a csvw:url property.
-        try:
-            # Python 2
-            (self.metadata_uri, _) = self.metadata_graph.subject_objects(CSVW.url).next()
-        except AttributeError:
-            # Python 3
-            (self.metadata_uri, _) = next(self.metadata_graph.subject_objects(CSVW.url))
+        (self.metadata_uri, _) = next(self.metadata_graph.subject_objects(CSVW.url))
 
 
         self.metadata = Item(self.metadata_graph, self.metadata_uri)
+
+        # Get the identifier for the
+        # Create a nanopublication for this dataset
+        self.np = Nanopublication(file_name, base = self.metadata_uri)
 
         # Add a prov:wasDerivedFrom between the nanopublication assertion graph
         # and the metadata_uri
         self.np.pg.add((self.np.ag.identifier, PROV[
                        'wasDerivedFrom'], self.metadata_uri))
-        # Add an attribution relation and dc:creator relation between the
+        # Add an attribution relation and dct:creator relation between the
         # nanopublication, the assertion graph and the authors of the schema
-        for o in self.metadata_graph.objects(self.metadata_uri, DC['creator']):
+        for o in self.metadata_graph.objects(self.metadata_uri, DCT['creator']):
             self.np.pg.add((self.np.ag.identifier, PROV['wasAttributedTo'], o))
             self.np.add((self.np.uri, PROV['wasAttributedTo'], o))
-            self.np.pig.add((self.np.ag.identifier, DC['creator'], o))
+            self.np.pig.add((self.np.ag.identifier, DCT['creator'], o))
 
         self.schema = self.metadata.csvw_tableSchema
 
@@ -268,29 +246,16 @@ class CSVWConverter(object):
 
         # The metadata schema overrides the default namespace values
         # (NB: this does not affect the predefined Namespace objects!)
-        # DEPRECATED
-        # namespaces.update({ns: url for ns, url in self.metadata['@context'][1].items() if not ns.startswith('@')})
+
 
         # Cast the CSVW column rdf:List into an RDF collection
-        #print(self.schema.csvw_column)
-        # print(len(self.metadata_graph))
 
         self.columns = Collection(self.metadata_graph, BNode(self.schema.csvw_column))
         # Python 3 can't work out Item so we'll just SPARQL the graph
 
         if not self.columns:
             self.columns = [o for s,p,o in self.metadata_graph.triples((None, URIRef("http://www.w3.org/1999/02/22-rdf-syntax-ns#first"), None))]
-        #
-        # from pprint import pprint
-        # pprint(self.columns)
-        # print("LOOOOOOOOOOOOOOOOOOOOOOO")
-        # from pprint import pprint
-        # # pprint(self.schema.csvw_column)
-        # pprint([term for term in self.schema])
-        # pprint('----------')
-        # pprint([term for term in self.schema.csvw_column])
 
-        #print(self.schema.csvw_column)
 
 
     def convert_info(self):
@@ -304,30 +269,16 @@ class CSVWConverter(object):
 
         for (s, p, o) in results:
             # Use iribaker
-            try:
-                # Python 2
-                escaped_object = URIRef(iribaker.to_iri(unicode(o)))
-            except NameError:
-                # Python 3
-                escaped_object = URIRef(iribaker.to_iri(str(o)))
-                # print(escaped_object)
+            escaped_object = URIRef(iribaker.to_iri(str(o)))
 
             # If the escaped IRI of the object is different from the original,
             # update the graph.
             if escaped_object != o:
                 self.metadata_graph.set((s, p, escaped_object))
                 # Add the provenance of this operation.
-                try:
-                    # Python 2
-                    self.np.pg.add((escaped_object,
-                                PROV.wasDerivedFrom,
-                                Literal(unicode(o), datatype=XSD.string)))
-                except NameError:
-                    # Python 3
-                    self.np.pg.add((escaped_object,
-                                PROV.wasDerivedFrom,
-                                Literal(str(o), datatype=XSD.string)))
-                    # print(str(o))
+                self.np.pg.add((escaped_object,
+                            PROV.wasDerivedFrom,
+                            Literal(str(o), datatype=XSD.string)))
 
         #walk through the metadata graph to remove illigal "Resource" blank node caused by python3 transition.
         for s, p, o in self.metadata_graph.triples((None, None, None)):
@@ -339,9 +290,6 @@ class CSVWConverter(object):
         # Add the information of the schema file to the provenance graph of the
         # nanopublication
         self.np.ingest(self.metadata_graph, self.np.pg.identifier)
-
-        # for s,p,o in self.np.triples((None,None,None)):
-        #     print(s.__repr__,p.__repr__,o.__repr__)
 
         return
 
@@ -373,9 +321,9 @@ class CSVWConverter(object):
     def _simple(self):
         """Starts a single process for converting the file"""
         with open(self.target_file, 'wb') as target_file:
-            with open(self.file_name, 'rb') as csvfile:
+            with open(self.file_name, 'rb') as csv_file:
                 logger.info("Opening CSV file for reading")
-                reader = csv.DictReader(csvfile,
+                reader = csv.DictReader(csv_file,
                                         encoding=self.encoding,
                                         delimiter=self.delimiter,
                                         quotechar=self.quotechar)
@@ -387,12 +335,7 @@ class CSVWConverter(object):
                 # converted CSV
                 out = c.process(0, reader, 1)
                 # We then write it to the file
-                try:
-                    # Python 2
-                    target_file.write(out)
-                except TypeError:
-                    # Python 3
-                    target_file.write(out.decode('utf-8'))
+                target_file.write(out.decode('utf-8'))
 
             self.convert_info()
             # Finally, write the nanopublication info to file
@@ -534,12 +477,7 @@ class BurstConverter(object):
                     # columns!
 
                     # Get the raw value from the cell in the CSV file
-                    try:
-                        # Python 2
-                        value = row[unicode(c.csvw_name)]
-                    except NameError:
-                        # Python 3
-                        value = row[str(c.csvw_name)]
+                    value = row[str(c.csvw_name)]
 
                     # This checks whether we should continue parsing this cell, or skip it.
                     if self.isValueNull(value, c):
@@ -566,18 +504,12 @@ class BurstConverter(object):
                     # This overrides the subject resource 's' that has been created earlier based on the
                     # schema wide aboutURLSchema specification.
 
-                    try:
-                        csvw_virtual = unicode(c.csvw_virtual)
-                        csvw_name = unicode(c.csvw_name)
-                        csvw_value = unicode(c.csvw_value)
-                        about_url = unicode(c.csvw_aboutUrl)
-                        value_url = unicode(c.csvw_valueUrl)
-                    except NameError:
-                        csvw_virtual = str(c.csvw_virtual)
-                        csvw_name = str(c.csvw_name)
-                        csvw_value = str(c.csvw_value)
-                        about_url = str(c.csvw_aboutUrl)
-                        value_url = str(c.csvw_valueUrl)
+
+                    csvw_virtual = str(c.csvw_virtual)
+                    csvw_name = str(c.csvw_name)
+                    csvw_value = str(c.csvw_value)
+                    about_url = str(c.csvw_aboutUrl)
+                    value_url = str(c.csvw_valueUrl)
 
                     if csvw_virtual == u'true' and c.csvw_aboutUrl is not None:
                         s = self.expandURL(c.csvw_aboutUrl, row)
@@ -586,19 +518,14 @@ class BurstConverter(object):
                         # This is an object property, because the value needs to be cast to a URL
                         p = self.expandURL(c.csvw_propertyUrl, row)
                         o = self.expandURL(c.csvw_valueUrl, row)
-                        try:
-                            if self.isValueNull(os.path.basename(unicode(o)), c):
-                                logger.debug("skipping empty value")
-                                continue
-                        except NameError:
-                            if self.isValueNull(os.path.basename(str(o)), c):
-                                logger.debug("skipping empty value")
-                                continue
+                        if self.isValueNull(os.path.basename(str(o)), c):
+                            logger.debug("skipping empty value")
+                            continue
 
                         if csvw_virtual == u'true' and c.csvw_datatype is not None and URIRef(c.csvw_datatype) == XSD.anyURI:
                             # Special case: this is a virtual column with object values that are URIs
                             # For now using a test special property
-                            value = row[unicode(c.csvw_name)].encode('utf-8')
+                            value = row[c.csvw_name].encode('utf-8')
                             o = URIRef(iribaker.to_iri(value))
 
                         if csvw_virtual == u'true' and c.csvw_datatype is not None and URIRef(c.csvw_datatype) == XSD.linkURI:
@@ -664,10 +591,7 @@ class BurstConverter(object):
                                 o = Literal(value, lang=self.render_pattern(
                                     c.csvw_lang, row))
                             else:
-                                try:
-                                    csvw_datatype = unicode(c.csvw_datatype)
-                                except NameError:
-                                    csvw_datatype = str(c.csvw_datatype).split(')')[0].split('(')[-1]
+                                csvw_datatype = str(c.csvw_datatype).split(')')[0].split('(')[-1]
                                     # csvw_datatype = str(c.csvw_datatype)
                                 # print(type(csvw_datatype))
                                 # print(csvw_datatype)
@@ -744,19 +668,11 @@ class BurstConverter(object):
     def expandURL(self, url_pattern, row, datatype=False):
         """Takes a Jinja or Python formatted string, applies it to the row values, and returns it as a URIRef"""
 
-        try:
-            unicode_url_pattern = unicode(url_pattern)
-        except NameError:
-            unicode_url_pattern = str(url_pattern).split(')')[0].split('(')[-1]
+        unicode_url_pattern = str(url_pattern).split(')')[0].split('(')[-1]
         # print(unicode_url_pattern)
 
         url = self.render_pattern(unicode_url_pattern, row)
 
-        # DEPRECATED
-        # for ns, nsuri in namespaces.items():
-        #     if url.startswith(ns):
-        #         url = url.replace(ns + ':', nsuri)
-        #         break
 
         try:
             iri = iribaker.to_iri(url)
@@ -770,10 +686,10 @@ class BurstConverter(object):
     def isValueNull(self, value, c):
         """This checks whether we should continue parsing this cell, or skip it because it is empty or a null value."""
         try:
-            if len(value) == 0 and unicode(c.csvw_parseOnEmpty) == u"true":
+            if len(value) == 0 and c.csvw_parseOnEmpty == u"true":
                 # print("Not skipping empty value")
                 return False #because it should not be skipped
-            elif len(value) == 0 or value == unicode(c.csvw_null) or value in [unicode(n) for n in c.csvw_null] or value == unicode(self.schema.csvw_null):
+            elif len(value) == 0 or value == c.csvw_null or value in [n for n in c.csvw_null] or value == self.schema.csvw_null:
                 # Skip value if length is zero and equal to (one of) the null value(s)
                 # logger.debug(
                 #     "Length is 0 or value is equal to specified 'null' value")

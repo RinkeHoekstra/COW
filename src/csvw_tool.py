@@ -1,9 +1,9 @@
 try:
     # git install
-    from converter.csvw import CSVWConverter, build_schema, extensions
+    from converter.csvw import CSVWConverter, build_schema, EXTENSIONS
 except ImportError:
     # pip install
-    from cow_csvw.converter.csvw import CSVWConverter, build_schema, extensions
+    from cow_csvw.converter.csvw import CSVWConverter, build_schema, EXTENSIONS
 import os
 import datetime
 import argparse
@@ -46,7 +46,7 @@ class COW(object):
                             g = ConjunctiveGraph()
                             g.parse(nquads_file, format='nquads')
                         # We serialize in the requested format
-                        with open(source_file + '.' + extensions[output_format], 'w') as output_file:
+                        with open(source_file + '.' + EXTENSIONS[output_format], 'w') as output_file:
                             output_file.write(g.serialize(format=output_format))
 
                 except ValueError:
