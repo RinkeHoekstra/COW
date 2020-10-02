@@ -238,7 +238,7 @@ class Nanopublication(Dataset):
 
         BASE = namespaces['dataset']
         # Assign default namespace prefixes
-        for prefix, namespace in namespaces:
+        for prefix, namespace in namespaces.items():
             self.bind(prefix, namespace)
 
         # Get the current date and time (UTC)

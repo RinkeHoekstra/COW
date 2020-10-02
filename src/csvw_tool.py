@@ -15,7 +15,7 @@ from werkzeug.utils import secure_filename
 
 class COW(object):
 
-    def __init__(self, mode=None, files=None, dataset=None, delimiter=None, quotechar='\"', processes=4, chunksize=5000, base="https://iisg.amsterdam/", output_format='nquads'):
+    def __init__(self, mode=None, files=None, dataset=None, delimiter=None, quotechar='\"', processes=4, chunksize=5000, base="https://iisg.amsterdam/", output_format='nquads', headers = []):
         """
         COW entry point
         """
@@ -31,7 +31,7 @@ class COW(object):
                     os.rename(target_file, secure_filename(target_file+"_"+timestamp))
                     print("Backed up prior version of schema to {}".format(target_file+"_"+timestamp))
 
-                build_schema(source_file, target_file, dataset_name=dataset, delimiter=delimiter, quotechar=quotechar, base=base)
+                build_schema(source_file, target_file, dataset_name=dataset, delimiter=delimiter, quotechar=quotechar, base=base, headers=headers)
 
             elif mode == 'convert':
                 print("Converting {} to RDF".format(source_file))
@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--chunksize', dest='chunksize', default='5000', type=int, help="The number of rows processed at each time")
     parser.add_argument('--base', dest='base', default='https://iisg.amsterdam/', type=str, help="The base for URIs generated with the schema (only relevant when `build`ing a schema)")
     parser.add_argument('--format', '-f', dest='format', nargs='?', choices=['xml', 'n3', 'turtle', 'nt', 'pretty-xml', 'trix', 'trig', 'nquads'], default='nquads', help="RDF serialization format")
+    parser.add_argument('--headers', dest='headers', nargs='*', help="A whitespace separated list of headers (use when the CSV file does not contain header information)")
 
     parser.add_argument('--version', dest='version', action='version', version='x.xx')
 
@@ -77,7 +78,7 @@ def main():
     for f in args.files:
         files += glob(f)
 
-    COW(args.mode, files, args.dataset, args.delimiter, args.quotechar, args.processes, args.chunksize, args.base, args.format)
+    COW(args.mode, files, args.dataset, args.delimiter, args.quotechar, args.processes, args.chunksize, args.base, args.format, args.headers)
 
 if __name__ == '__main__':
     main()

@@ -5,6 +5,8 @@ import os
 import datetime
 import json
 import logging
+import re
+
 import iribaker
 import traceback
 import rfc3987
@@ -13,7 +15,7 @@ import multiprocessing as mp
 import unicodecsv as csv
 from jinja2 import Template
 from .util import get_namespaces, Nanopublication, EXTENSIONS
-from .util.namespaces import CSVW, PROV, DCT, SKOS, RDF
+from .util.namespaces import CSVW, PROV, DCT, SKOS, RDF, COW
 from rdflib import URIRef, Literal, Graph, BNode, XSD, Dataset
 from rdflib.resource import Resource
 from rdflib.collection import Collection
@@ -29,7 +31,7 @@ logger.setLevel(logging.DEBUG)
 
 
 
-def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None, dataset_name=None, base="https://iisg.amsterdam/"):
+def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None, dataset_name=None, base="https://iisg.amsterdam/", headers=[]):
     """
     Build a CSVW schema based on the ``infile`` CSV file, and write the resulting JSON CSVW schema to ``outfile``.
 
@@ -95,32 +97,43 @@ def build_schema(infile, outfile, delimiter=None, quotechar='\"', encoding=None,
         }
     }
 
+    logger.info("Gleaning column information from file")
     with open(infile, 'rb') as infile_file:
         r = csv.reader(infile_file, delimiter=delimiter, quotechar=quotechar)
+        gleaned_headers = next(r)
 
+    if len(headers) == 0:
+        headers = gleaned_headers
+        logger.info(u"Found headers: {}".format(headers))
+    elif len(headers) != len(gleaned_headers):
+        logger.warning("Number of column headers ({}) does not correspond to the number of columns ({}) found in the file. The metadata fill will not be correct! ".format(len(headers), len(gleaned_headers)))
 
-        header = next(r)
+    logger.info(u"Using headers: {}".format(headers))
 
-        logger.info(u"Found headers: {}".format(header))
+    if u'' in headers:
+        logger.warning("WARNING: You have one or more empty column headers in your CSV file. Conversion might produce incorrect results because of conflated URIs or worse")
+    if len(set(headers)) < len(headers):
+        logger.warning("WARNING: You have two or more column headers that are syntactically the same. Conversion might produce incorrect results because of conflated URIs or worse")
 
-        if u'' in header:
-            logger.warning("WARNING: You have one or more empty column headers in your CSV file. Conversion might produce incorrect results because of conflated URIs or worse")
-        if len(set(header)) < len(header):
-            logger.warning("WARNING: You have two or more column headers that are syntactically the same. Conversion might produce incorrect results because of conflated URIs or worse")
+    for head in headers:
+        head_length = len(head)
+        regex = "[\s\d]{{{}}}".format(head_length)
+        if re.match(regex, head):
+            logger.warning("WARNING: Header '{}' contains only numbers and/or whitespace. It looks like your CSV file does not have header columns. COW will choke.".format(head))
 
-        # First column is primary key
-        metadata[u'tableSchema'][u'primaryKey'] = header[0]
+    # First column is primary key
+    metadata[u'tableSchema'][u'primaryKey'] = headers[0]
 
-        for head in header:
-            col = {
-                u"@id": iribaker.to_iri(u"{}/{}/column/{}".format(base, url, head)),
-                u"name": head,
-                u"titles": [head],
-                u"dct:description": head,
-                u"datatype": u"string"
-            }
+    for head in headers:
+        col = {
+            u"@id": iribaker.to_iri(u"{}/{}/column/{}".format(base, url, head)),
+            u"name": head,
+            u"titles": [head],
+            u"dct:description": head,
+            u"datatype": u"string"
+        }
 
-            metadata[u'tableSchema'][u'columns'].append(col)
+        metadata[u'tableSchema'][u'columns'].append(col)
 
     with open(outfile, 'w') as outfile_file:
         outfile_file.write(json.dumps(metadata, indent=True))
@@ -249,12 +262,11 @@ class CSVWConverter(object):
 
 
         # Cast the CSVW column rdf:List into an RDF collection
+        self.columns = Collection(self.metadata_graph, self.schema.csvw_column.identifier)
 
-        self.columns = Collection(self.metadata_graph, BNode(self.schema.csvw_column))
-        # Python 3 can't work out Item so we'll just SPARQL the graph
+        self.fieldnames = [Item(self.metadata_graph, column).csvw_name.value for column in self.columns]
+        print(self.fieldnames)
 
-        if not self.columns:
-            self.columns = [o for s,p,o in self.metadata_graph.triples((None, URIRef("http://www.w3.org/1999/02/22-rdf-syntax-ns#first"), None))]
 
 
 
@@ -326,7 +338,8 @@ class CSVWConverter(object):
                 reader = csv.DictReader(csv_file,
                                         encoding=self.encoding,
                                         delimiter=self.delimiter,
-                                        quotechar=self.quotechar)
+                                        quotechar=self.quotechar,
+                                        fieldnames=self.fieldnames)
 
                 logger.info("Starting in a single process")
                 c = BurstConverter(self.np.ag.identifier, self.columns,
@@ -349,7 +362,8 @@ class CSVWConverter(object):
                 reader = csv.DictReader(csvfile,
                                         encoding=self.encoding,
                                         delimiter=self.delimiter,
-                                        quotechar=self.quotechar)
+                                        quotechar=self.quotechar,
+                                        fieldnames=self.fieldnames)
 
                 # Initialize a pool of processes (default=4)
                 pool = mp.Pool(processes=self._processes)
@@ -449,6 +463,7 @@ class BurstConverter(object):
         # We iterate row by row, and then column by column, as given by the CSVW mapping file.
         mult_proc_counter = 0
         iter_error_counter= 0
+
         for row in rows:
             # This fixes issue:10
             if row is None:
@@ -574,7 +589,7 @@ class BurstConverter(object):
                                 propertyUrl = self.metadata_graph.namespaces()[""][
                                     csvw_name]
                             else:
-                                propertyUrl = "{}{}".format(get_namespaces()['sdv'],
+                                propertyUrl = "{}{}".format(COW,
                                     csvw_name)
 
                             p = self.expandURL(propertyUrl, row)
@@ -654,7 +669,13 @@ class BurstConverter(object):
         # print(type(row))
         # rendered_template = template.render(Int=120000)
 
-        rendered_template = template.render(**row)
+        try:
+            rendered_template = template.render(**row)
+        except TypeError as e:
+            logger.warning("Could not create rendered template from row (most likely due to a column separator appearing in an unquoted string): {}".format(row))
+            logger.warning("Removed column with 'None' key: {}".format(row[None]))
+            row.pop(None)
+            rendered_template = template.render(**row)
 
         try:
             # We then format the resulting string using the standard Python2
