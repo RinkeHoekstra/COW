@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "cow-csvw"
+version = "0.7.0"
+description = "COW: CSV on the Web Converters"
+authors = ["Your Name <you@example.com>"]
+license = "MIT License"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+rdflib = "^5.0.0"
+rdflib-jsonld = "^0.5.0"
+iribaker = "^0.1.3"
+jinja2 = "^2.11.2"
+pyyaml = "^5.3.1"
+werkzeug = "^1.0.1"
+js2py = "^0.70"
+unicodecsv = "^0.14.1"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
