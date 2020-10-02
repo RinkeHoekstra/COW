@@ -81,6 +81,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-# FILE = '../sdh-private-hisco-datasets/hisco_45.csv'
-# SCHEMA = '../sdh-private-hisco-datasets/hisco_45.csv-metadata.json'
