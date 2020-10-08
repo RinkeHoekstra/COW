@@ -16,6 +16,7 @@ werkzeug = "^1.0.1"
 js2py = "^0.70"
 unicodecsv = "^0.14.1"
 chardet = "^3.0.4"
+requests = "^2.24.0"
 
 [tool.poetry.dev-dependencies]
 
