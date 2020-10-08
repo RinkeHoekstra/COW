@@ -18,8 +18,7 @@ logger.addHandler(ch)
 
 
 # Serialization extension dictionary
-EXTENSIONS = {'xml': 'xml', 'n3': 'n3', 'turtle': 'ttl', 'nt': 'nt', 'pretty-xml': 'xml', 'trix': 'trix',
-                    'trig': 'trig', 'nquads': 'nq'}
+EXTENSIONS = {'trix': 'trix', 'trig': 'trig', 'nquads': 'nq', 'json-ld': 'jsonld'}
 
 def reindent(s, num_spaces):
     s = s.split('\n')
@@ -307,9 +306,9 @@ class Nanopublication(Dataset):
         # The URI of the latest version of this converter
         # TODO: should point to the actual latest commit of this converter.
         # TODO: consider linking to this as the plan of some activity, rather than an activity itself.
-        clariah_uri = URIRef('https://github.com/CLARIAH/wp4-converters')
+        cow_uri = URIRef('https://github.com/CLARIAH/COW')
 
-        self.pig.add((self.uri, PROV['wasGeneratedBy'], clariah_uri))
+        self.pig.add((self.uri, PROV['wasGeneratedBy'], cow_uri))
         self.pig.add((self.uri, PROV['generatedAtTime'],
                       Literal(timestamp, datatype=XSD.dateTime)))
 
